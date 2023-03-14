@@ -73,6 +73,8 @@ gantt.$set({
 - `to` {`Moment`} Datetime timeline ends on.
 - `minWidth` {`Number`} Minimum width of gantt area in px.
 - `fitWidth` {`Boolean`} Should timeline stretch width to fit.
+- `highlightWeekends` {`Boolean`} Should weekends be highlighted. (V1 Only works when columnUnit == 'day' && columnOffset == 1)
+- `highlightColor` {`String`} Highlight color (weekends only for now).
 - `magnetUnit` {`String`} Minimum unit of time task date values will round to.
 - `magnetOffset` {`Number`} Amount of units task date values will round to.
 - `columnUnit` {`String`} Duration unit of columns.
@@ -157,6 +159,7 @@ Rows are defined as a list of objects. Rows can be rendered as a collapsible tre
 - `label` {`String`} Label of row, could be any other property, can be displayed with SvelteGanttTable.
 - `headerHtml` {`String`} Html content of table row header, displayed in SvelteGanttTable.
 - `children` {`Array`} List of children row objects, these can have their own children.
+- `expanded` {`Boolean`} {`optional`} Property of the row, if false, row will be closed on first load
 
 ## Task
 Tasks are defined as a list of objects:
@@ -295,10 +298,10 @@ npm install
 ...then start [Rollup](https://rollupjs.org):
 
 ```bash
-npm run dev:docs
+npm run demo:dev
 ```
 
-Navigate to [localhost:5000](http://localhost:5000). You should see your app running. Edit a component file in `src`, save it, and reload the page to see your changes.
+Navigate to [localhost:5000](http://localhost:5000/svelte-gantt). You should see your app running. Edit a component file in `src`, save it, and reload the page to see your changes.
 
 ## Build the package
 

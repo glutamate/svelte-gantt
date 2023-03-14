@@ -1,14 +1,14 @@
 <script>
-    import { createEventDispatcher, onMount } from 'svelte';
+    import { createEventDispatcher } from 'svelte';
 
     const dispatch = createEventDispatcher();
 
-    import { Draggable } from 'src/core/drag';
-    import { setCursor } from 'src/utils/domUtils';
+    import { Draggable } from '../core/drag';
+    import { setCursor } from '../utils/domUtils';
 
-    export let x = 240;
+    export let x;
     export let container;
-
+    
     let dragging = false;
     const dragOptions = {
         onDrag: (event) => {
@@ -32,7 +32,7 @@
     $: dragOptions.container = container;
 
     function resizer(node) {
-        return new Draggable(node, dragOptions);
+        return new Draggable(node, dragOptions, 'resizer');
     }
 </script>
 

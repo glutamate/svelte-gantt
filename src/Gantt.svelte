@@ -3,20 +3,19 @@
     import { writable, derived } from 'svelte/store';
 
     let ganttElement: HTMLElement;
-    let mainHeaderContainer;
+    let mainHeaderContainer: HTMLElement;
     let mainContainer;
-    let rowContainer;
+    let rowContainer: HTMLElement;
     let scrollables = [];
     let mounted = false;
 
     import { rowStore, taskStore, timeRangeStore, allTasks, allRows, allTimeRanges, rowTaskCache } from './core/store';
-    import { Task, Row, TimeRange, TimeRangeHeader, Milestone } from './entities';
+    import { Task, SelectionManager, Row, TimeRange, TimeRangeHeader } from './entities';
     import { Columns, ColumnHeader } from './column';
     import { Resizer } from './ui';
 
     import { GanttUtils, getPositionByDate } from './utils/utils';
-    import { getRelativePos, debounce, throttle } from './utils/domUtils';
-    import { SelectionManager } from './utils/selectionManager';
+    import { getRelativePos, debounce, throttle, isLeftClick } from './utils/domUtils';
     import { GanttApi } from './core/api';
     import { TaskFactory, reflectTask } from './core/task';
     import type { SvelteTask } from './core/task';
@@ -24,8 +23,9 @@
     import { TimeRangeFactory } from './core/timeRange';
     import { DragDropManager } from './core/drag';
     import { findByPosition, findByDate } from './core/column';
+    import type { Column } from './core/column';
     import { onEvent, onDelegatedEvent, offDelegatedEvent } from './core/events';
-    import { NoopSvelteGanttDateAdapter, getDuration } from './utils/date';
+    import { NoopSvelteGanttDateAdapter, getDuration, getAllPeriods } from './utils/date';
     import type { SvelteGanttDateAdapter } from './utils/date';
 
     function assertSet(values) {
@@ -39,6 +39,7 @@
     export let rows;
     export let tasks = [];
     export let timeRanges = [];
+
     assertSet({rows});
     $: if(mounted) initRows(rows);
     $: if(mounted) initTasks(tasks);
@@ -93,10 +94,10 @@
 		}
 	];
     export let taskContent = null;
-    export let tableWidth = 100;
+    export let tableWidth = 240;
     export let resizeHandleWidth = 10;
     export let onTaskButtonClick = null;
-    
+
     export let dateAdapter: SvelteGanttDateAdapter = new NoopSvelteGanttDateAdapter();
 
     export let magnetUnit = 'minute';
@@ -113,15 +114,6 @@
 
     export let columnUnit = 'minute';
     export let columnOffset = 15;
-    let columnDuration;
-    $: setColumnDuration(columnUnit, columnOffset);
-    setColumnDuration(columnUnit, columnOffset);
-
-    function setColumnDuration(unit, offset) {
-        if(unit && offset) {
-            columnDuration = getDuration(unit, offset);
-        }
-    }
 
     // export until Svelte3 implements Svelte2's setup(component) hook
     export let ganttTableModules = [];
@@ -130,8 +122,11 @@
     export let reflectOnParentRows = true;
     export let reflectOnChildRows = false;
 
-    export let columnStrokeColor;
-    export let columnStrokeWidth;
+    export let columnStrokeColor = '#efefef';
+    export let columnStrokeWidth = 1;
+
+    export let highlightedDurations;
+    export let highlightColor = "#6eb859";
 
     export let taskElementHook = null;
 
@@ -181,57 +176,46 @@
         }
     }
 
-    function add(a: number | Date, b: number | Date) {
-        if(a instanceof Date) {
-            a = a.valueOf();
-        }
-        if(b instanceof Date) {
-            b = b.valueOf();
-        }
-        return a + b;
+    let disableTransition = true;
+    
+    async function tickWithoutCSSTransition() {
+        disableTransition = !disableTransition;
+        await tick();
+        ganttElement.offsetHeight; // force a reflow
+        disableTransition = !!disableTransition;
     }
 
-    const columnWidth = writable(getPositionByDate($_from + columnDuration, $_from, $_to, $_width) | 0);
-    $: $columnWidth = getPositionByDate($_from + columnDuration, $_from, $_to, $_width) | 0;
-    let columnCount = Math.ceil($_width / $columnWidth);
-    $: columnCount = Math.ceil($_width / $columnWidth);
-    let columns = getColumns($_from, columnCount, columnDuration, $columnWidth);
-    $: columns = getColumns($_from, columnCount, columnDuration, $columnWidth);
-
-    function getColumns(from: number, count: number, dur: number, width: number) {
-
-        if(!isFinite(count))
-            throw new Error('column count is not a finite number');
-        if(width <= 0)
-            throw new Error('column width is not a positive number');
-
-        let columns = [];
-        let columnFrom = from;
-        let left = 0;
-        for (let i = 0; i < count; i++) {
-            const from = columnFrom;
-            const to = columnFrom + dur;
-            const duration = to - from;
-
-            columns.push({
-                width: width,
-                from,
-                left,
-                duration
-            });
-            left += width;
-            columnFrom = to;
-        }
-        
-        return columns;
-    }
-
-    const dimensionsChanged = derived([columnWidth, _from, _to], () => ({}));
+    let columns;
     $: {
-        if($dimensionsChanged) {
-            refreshTasks();
-            refreshTimeRanges();
-        }
+        columns = getColumnsV2($_from, $_to, columnUnit, columnOffset, $_width);
+        tickWithoutCSSTransition();
+        refreshTimeRanges();
+        refreshTasks();
+    }
+
+    function getColumnsV2(from:number | Date, to:number | Date, unit:string, offset:number, width:number): Column[] {
+        //BUG: Function is running twice on init, how to prevent it?
+        
+        if(from instanceof Date) from = from.valueOf();
+        if(to instanceof Date) to = to.valueOf();
+        
+        let cols            = [];
+        const periods       = getAllPeriods(from.valueOf(), to.valueOf(), unit, offset, highlightedDurations);
+        let left            = 0;
+        let distance_point  = 0;
+        periods.forEach(function(period){
+            left = distance_point;
+            distance_point = getPositionByDate(period.to, $_from, $_to, $_width)
+            cols.push({
+                width:distance_point - left,
+                from:period.from,
+                to:period.to,
+                left:left,
+                duration:period.duration,
+                ...(period.isHighlighted && {'bgHighlightColor': highlightColor})
+            })
+        })
+        return cols;
     }
 
     setContext('dimensions', {
@@ -240,8 +224,7 @@
         width: _width,
         visibleWidth,
         visibleHeight,
-        headerHeight,
-        dimensionsChanged
+        headerHeight
     });
 
     setContext('options', {
@@ -280,17 +263,23 @@
         api.registerEvent('tasks', 'change');
         api.registerEvent('tasks', 'changed');
         api.registerEvent('gantt', 'viewChanged');
+        api.registerEvent('gantt', 'dateSelected');
         api.registerEvent('tasks', 'dblclicked');
+        api.registerEvent('timeranges', 'clicked');
+        api.registerEvent('timeranges', 'resized');
 
         mounted = true;
     });
 
-    onDelegatedEvent('click', 'data-task-id', (event, data, target) => {
+    onDelegatedEvent('mousedown', 'data-task-id', (event, data, target) => {
         const taskId = +data;
-        if (event.ctrlKey) {
-            selectionManager.toggleSelection(taskId);
-        } else {
-            selectionManager.selectSingle(taskId);
+        if(isLeftClick(event) && !target.classList.contains("sg-task-reflected")){
+            if (event.ctrlKey) {
+                selectionManager.toggleSelection(taskId, target);
+            } else {
+                selectionManager.selectSingle(taskId, target);
+            }
+            selectionManager.dispatchSelectionEvent(taskId, event)
         }
         api['tasks'].raise.select($taskStore.entities[taskId]);
     });
@@ -300,12 +289,24 @@
     });
 
     onDelegatedEvent('click', 'data-row-id', (event, data, target) => {
+        selectionManager.unSelectTasks();
+        if($selectedRow == +data){
+            $selectedRow = null;
+            return
+        }
         $selectedRow = +data;
     });
-    
+
+    onDelegatedEvent('mouseleave', 'empty', (event, data, target) => {
+        $hoveredRow = null;
+    });
+
     onDestroy(() => {
         offDelegatedEvent('click', 'data-task-id');
         offDelegatedEvent('click', 'data-row-id');
+        offDelegatedEvent('mousedown', 'data-task-id');
+
+        selectionManager.unSelectTasks();
     });
 
     let __scrollTop = 0;
@@ -394,9 +395,11 @@
     function onDateSelected(event) {
         $_from = event.detail.from;
         $_to = event.detail.to;
+        api['gantt'].raise.dateSelected({from:$_from, to:$_to})
     }
 
     function initRows(rowsData) {
+        //Bug: Running twice on change options
         const rows = rowFactory.createRows(rowsData);
         rowStore.addAll(rows);
     }
@@ -443,13 +446,6 @@
         
     }
 
-    async function tickWithoutCSSTransition() {
-        disableTransition = false;
-        await tick();
-        ganttElement.offsetHeight; // force a reflow
-        disableTransition = true;
-    }
-
     export const api = new GanttApi();
     const selectionManager = new SelectionManager();
 
@@ -473,9 +469,8 @@
         utils.magnetOffset = magnetOffset;
         utils.magnetUnit = magnetUnit;
         utils.magnetDuration = magnetDuration;
-
-        utils.totalColumnDuration = columnCount * columnDuration;
-        utils.totalColumnWidth = columnCount * $columnWidth;
+        //utils.to = columns[columns.length - 1].to;
+        //utils.width = columns.length * columns[columns.length - 1].width;
     }
 
     setContext('services', {
@@ -508,7 +503,6 @@
             task.left = newLeft;
             task.width = newRight - newLeft;
         });
-
         taskStore.refresh();
     }
 
@@ -519,12 +513,12 @@
     export function selectTask(id) {
         const task = $taskStore.entities[id];
         if (task) {
-            selectionManager.selectSingle(task);
+            selectionManager.selectSingle(task, document.querySelector(`data-task-id='${id}'`));
         }
     }
 
     export function unselectTasks() {
-        selectionManager.clearSelection();
+        selectionManager.unSelectTasks();
     }
 
     export function scrollToRow(id, scrollBehavior = 'auto') {
@@ -621,9 +615,6 @@
     let filteredRows = [];
     $: filteredRows = $allRows.filter(row => !row.hidden);
 
-    let rightScrollbarVisible;
-    $: rightScrollbarVisible = rowContainerHeight > $visibleHeight;
-
     let rowContainerHeight;
     $: rowContainerHeight = filteredRows.length * rowHeight;
 
@@ -645,32 +636,34 @@
     let visibleTasks: SvelteTask[];
     $: {
         const tasks = [];
-        visibleRows.forEach(row => {
+        for (let i = 0; i < visibleRows.length; i++) {
+            const row = visibleRows[i];
             if ($rowTaskCache[row.model.id]) {
-                $rowTaskCache[row.model.id].forEach(id => {
+                for (let j = 0; j < $rowTaskCache[row.model.id].length; j++) {
+                    const id = $rowTaskCache[row.model.id][j];
                     tasks.push($taskStore.entities[id]);
-                });
+                }
             }
-        });
+        }
         visibleTasks = tasks;
     }
 
-    let disableTransition = true;
-    $: if($dimensionsChanged) tickWithoutCSSTransition();
 </script>
 
-<div class="sg-gantt {classes}" class:sg-disable-transition={!disableTransition} bind:this={ganttElement} on:click={onEvent} on:mouseover={onEvent}>
+<!-- svelte-ignore a11y-click-events-have-key-events -->
+<!-- svelte-ignore a11y-mouse-events-have-key-events -->
+<div class="sg-gantt {classes}" class:sg-disable-transition={!disableTransition} bind:this={ganttElement} on:mousedown|stopPropagation={onEvent} on:click|stopPropagation={onEvent} on:mouseover={onEvent} on:mouseleave={onEvent}>
     {#each ganttTableModules as module}
-    <svelte:component this={module} {rowContainerHeight} {paddingTop} {paddingBottom} tableWidth={tableWidth} {...$$restProps} on:init="{onModuleInit}" {visibleRows} />
+    <svelte:component this={module} {rowContainerHeight} {paddingTop} {paddingBottom} {tableWidth} {...$$restProps} on:init="{onModuleInit}" {visibleRows} />
 
     <Resizer x={tableWidth} on:resize="{onResize}" container={ganttElement}></Resizer>
     {/each}
 
     <div class="sg-timeline sg-view">
-        <div class="sg-header" bind:this={mainHeaderContainer} bind:clientHeight="{$headerHeight}" class:right-scrollbar-visible="{rightScrollbarVisible}">
+        <div class="sg-header" bind:this={mainHeaderContainer} bind:clientHeight="{$headerHeight}">
             <div class="sg-header-scroller" use:horizontalScrollListener>
                 <div class="header-container" style="width:{$_width}px">
-                    <ColumnHeader {headers} {columnUnit} {columnOffset} on:dateSelected="{onDateSelected}" />
+                    <ColumnHeader {headers} ganttBodyColumns={columns} ganttBodyUnit={columnUnit} on:dateSelected="{onDateSelected}" />
                     {#each $allTimeRanges as timeRange (timeRange.model.id)}
                     <TimeRangeHeader {...timeRange} />
                     {/each}
@@ -681,7 +674,8 @@
         <div class="sg-timeline-body" bind:this={mainContainer} use:scrollable class:zooming="{zooming}" on:wheel="{onwheel}"
          bind:clientHeight="{$visibleHeight}" bind:clientWidth="{$visibleWidth}">
             <div class="content" style="width:{$_width}px">
-                <Columns columns={columns} {columnStrokeColor} {columnStrokeWidth}/>
+                <Columns {columns} {columnStrokeColor} {columnStrokeWidth}/>
+
                 <div class="sg-rows" bind:this={rowContainer} style="height:{rowContainerHeight}px;">
                     <div style="transform: translateY({paddingTop}px);">
                         {#each visibleRows as row (row.model.id)}
@@ -689,6 +683,7 @@
                         {/each}
                     </div>
                 </div>
+                
                 <div class="sg-foreground">
                     {#each $allTimeRanges as timeRange (timeRange.model.id)}
                     <TimeRange {...timeRange} />
@@ -717,10 +712,10 @@
         margin-left: 5px;
     }
     
-    /* This class should take into account varying widths of the scroll bar */
+    /* This class should take into account varying widths of the scroll bar
     .right-scrollbar-visible {
         padding-right: 17px;
-    }
+    } */
 
     .sg-timeline {
         flex: 1 1 0%;
@@ -758,13 +753,6 @@
     .sg-timeline-body {
         overflow: auto;
         flex: 1 1 auto;
-    }
-
-    .sg-header {
-        
-    }
-
-    .header-container {
     }
 
     .sg-header-scroller {

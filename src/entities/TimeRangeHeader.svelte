@@ -1,18 +1,12 @@
 <script lang="ts">
     import { beforeUpdate, getContext } from 'svelte';
-
+    import type { GanttContext, GanttContextServices, GanttContextOptions } from '../gantt'
     import { Draggable } from '../core/drag';
     import { timeRangeStore } from '../core/store';
 
-    const { rowContainer } = getContext('gantt');
-    const { utils, columnService } = getContext('services');
-    const { resizeHandleWidth } = getContext('options');
-    const {
-        from,
-        to,
-        width: ganttWidth,
-        visibleWidth
-    } = getContext('dimensions');
+    const { rowContainer } : GanttContext = getContext('gantt');
+    const { api, utils, columnService } : GanttContextServices = getContext('services');
+    const { resizeHandleWidth } : GanttContextOptions = getContext('options');
 
     export let model;
     export let width;
@@ -56,6 +50,7 @@
 
         const draggable = new Draggable(node, {
             onDown: (event) => {
+                api.timeranges.raise.clicked({model});
                 update({
                     left: event.x,
                     width: event.width,
@@ -64,6 +59,7 @@
                 });
             }, 
             onResize: (event) => {
+                api.timeranges.raise.resized({model, left:event.x, width:event.width});
                 update({
                     left: event.x,
                     width: event.width,
@@ -83,9 +79,14 @@
 
         return { destroy: () => draggable.destroy() };
     }
+
+    function setClass(node){
+        if(!model.classes) return;
+        node.classList.add(model.classes);
+    }
 </script>
 
-<div class="sg-time-range-control" style="width:{_position.width}px;left:{_position.x}px">
+<div class="sg-time-range-control" style="width:{_position.width}px;left:{_position.x}px" use:setClass>
     <div class="sg-time-range-handle-left" use:drag></div>
     <div class="sg-time-range-handle-right" use:drag></div>
 </div>

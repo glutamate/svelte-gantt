@@ -1,5 +1,6 @@
 export interface RowModel {
-    id: number;
+    id: number | string;
+    label: string;
     classes?: string | string[];
     contentHtml?: string;
     enableDragging?: boolean;
@@ -12,6 +13,7 @@ export interface RowModel {
     iconClass?: string;
     /** Url of image in row header */
     imageSrc?: string;
+    expanded?:boolean
 }
 
 export interface SvelteRow {
@@ -26,6 +28,7 @@ export interface SvelteRow {
     allParents?: SvelteRow[];
     expanded?: boolean;
     childLevel?: number;
+    entities?:any;
 }
 
 export class RowFactory {

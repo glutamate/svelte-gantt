@@ -1,9 +1,9 @@
 <script lang="ts">
-    import { createEventDispatcher, getContext } from "svelte";
+    import { createEventDispatcher, getContext, onMount } from "svelte";
 
     import TableTreeCell from './TableTreeCell.svelte';
     import type { TableHeader } from './tableHeader';
-    import type { SvelteRow } from "src/core/row";
+    import type { SvelteRow } from '../../core/row';
 
     export let headers: TableHeader[] = null;
     export let row: SvelteRow = null;
@@ -17,6 +17,10 @@
     $: {
         treeIndentationStyle = row.parent ? `padding-left: ${row.childLevel*3}em;`:'';
     }
+
+    onMount(()=>{
+        if(row.model.expanded == false) dispatch('rowCollapsed', { row });
+    })
 
 </script>
 

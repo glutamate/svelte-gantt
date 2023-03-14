@@ -1,79 +1,75 @@
 <script lang="ts">
     import { createEventDispatcher, getContext } from 'svelte';
-
+    import type { GanttContextDimensions } from '../gantt'
     const dispatch = createEventDispatcher();
 
     import type { SvelteGanttDateAdapter } from '../utils/date';
-    import { startOf, getDuration } from '../utils/date';
+    import { getAllPeriods} from '../utils/date';
+    import { getPositionByDate} from '../utils/utils';
 
-    const { from, to, width } = getContext('dimensions');
+    const { from, to, width } : GanttContextDimensions = getContext('dimensions');
     const { dateAdapter }: { dateAdapter: SvelteGanttDateAdapter } = getContext('options');
 
     export let header;
-    export let baseWidth;
-    export let baseDuration;
+    
+    export let ganttBodyColumns;
+    export let ganttBodyUnit;
 
-    export let columnWidth;
     $: {
-        header.duration = getDuration(header.unit, header.offset);
-        const duration = header.duration;
-        const ratio = duration / baseDuration;
-        columnWidth = baseWidth * ratio;
-    }
-
-    export let columnCount;
-    $: {
-        columnCount = Math.ceil($width / columnWidth);
-        if(!isFinite(columnCount)){
-            console.error('columnCount is not finite');
-            columnCount = 0;
-        }
-    }
-
-    let _headers = [];
-    $: {
-        const headers = [];
-        let headerTime = startOf($from, header.unit);
-
-        for(let i = 0; i < columnCount; i++){
-            headers.push({
-                width: Math.min(columnWidth, $width), 
-                label: dateAdapter.format(headerTime, header.format),
-                from: headerTime,
-                to: headerTime + header.duration,
-                unit: header.unit
-            });
-            headerTime += header.duration;
-        }
-        _headers = headers;
+        if (header.unit === ganttBodyUnit) {
+                header.columns = ganttBodyColumns.map(column => ({
+                    ...column,
+                    label: dateAdapter.format(column.from, header.format),
+                }));
+            } else {
+                const periods = getAllPeriods($from.valueOf(), $to.valueOf(), header.unit);
+                let distance_point = 0;
+                let left           = 0;
+                header.columns  = periods.map(period => {
+                    left = distance_point;
+                    distance_point = getPositionByDate(period.to, $from.valueOf(), $to.valueOf(), $width);
+                    return {
+                        width: Math.min(distance_point - left, $width),
+                        label: dateAdapter.format(period.from, header.format),
+                        from: period.from,
+                        to: period.to,
+                        left: left,
+                    }
+                });
+            }
     }
 </script>
 
 <div class="column-header-row">
-    {#each _headers as _header}
-        <div class="column-header-cell" class:sticky={header.sticky} style="width:{_header.width}px" on:click="{() => dispatch('dateSelected', { from: _header.from, to: _header.to, unit: _header.unit })}">
+    {#each header.columns as _header}
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <div class="column-header-cell" class:sticky={header.sticky} style="left:{_header.left}px;width:{_header.width}px" on:click="{() => dispatch('dateSelected', { from: _header.from, to: _header.to, unit: header.unit })}">
             <div class="column-header-cell-label">{_header.label || 'N/A'}</div>
         </div>
     {/each}
 </div>
+
 <style>
     .column-header-row {
-        box-sizing: border-box;
+        position: relative;
+
         white-space: nowrap;
         height: 32px;
     }
 
     .column-header-cell {
-        display: inline-block;
+        position: absolute;
+
         height: 100%;
         box-sizing: border-box;
         text-overflow: clip;
-        /* vertical-align: top; */
         text-align: center;
 
         display: inline-flex;
+        
         justify-content: center;
         align-items: center;
+
         font-size: 1em;    
         font-size: 14px;
         font-weight: 300;
